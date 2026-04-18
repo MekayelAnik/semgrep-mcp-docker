@@ -25,9 +25,16 @@ Client ──► HAProxy :7055 (TLS/H2/H3, Bearer, CORS, rate) ──► superga
 ## Pro Engine gate
 
 `resolve_pro_mode()` in entrypoint:
-- Token present → `semgrep login` + full 9 tools
-- Token absent → auto-disable `SEMGREP_FINDINGS_DISABLED`, `SEMGREP_SCAN_REMOTE_DISABLED`, `SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED` (only if user hasn't already set them)
-- `REQUIRE_PRO=true` + no token → exit 1
+- **Token absent** → auto-disable `SEMGREP_FINDINGS_DISABLED`, `SEMGREP_SCAN_REMOTE_DISABLED`, `SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED` (only if user hasn't already set them). OSS mode.
+- **Token present + Pro binary cached** → use cached binary, skip install.
+- **Token present + binary missing + `INSTALL_PRO_ON_START=true` (default)** → run `semgrep install-semgrep-pro` inline (~376MB, 30-120s). On success: Pro active. On 401/403/network fail: log warning, fall back OSS (or exit if `REQUIRE_PRO=true`).
+- **Token present + `INSTALL_PRO_ON_START=false`** → forward token only, Pro tools fail until binary installed manually.
+- **`REQUIRE_PRO=true` + no token** → exit 1.
+- **`REQUIRE_PRO=true` + install fails** → exit 1.
+
+Pro binary path resolved dynamically via `semgrep.semgrep_core.SemgrepCore.path(pro=True)` with fallback to `$(dirname $(which semgrep-core))/semgrep-core-proprietary`. NOT persisted across `docker rm` (binary lives in site-packages, not a named volume). Each fresh container re-downloads if Pro wanted — intentional, avoids version-stamp drift on image upgrades.
+
+Healthcheck `start-period=240s` to absorb Pro install on first boot.
 
 ## Universal posture
 

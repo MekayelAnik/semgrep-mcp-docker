@@ -577,21 +577,45 @@ start_haproxy() {
     HAPROXY_PID=$!
 }
 
-# Pro Engine gate: detect SEMGREP_APP_TOKEN, toggle cloud-only tools
+# Pro Engine gate: detect SEMGREP_APP_TOKEN, install Pro binary if authorized,
+# toggle cloud-only tools when no token.
+#
 # Note: we do NOT invoke `semgrep login` here — upstream `semgrep mcp` reads
 # SEMGREP_APP_TOKEN directly from env on every tool invocation. Running login
 # as root would persist creds under /root/.semgrep while the MCP subprocess
 # reads /home/semgrep/.semgrep, and some CLI versions can block on interactive
 # OAuth confirmation. The env var alone is sufficient for full Pro access.
+#
+# Pro binary auto-install: when SEMGREP_APP_TOKEN is set and the
+# `semgrep-core-proprietary` binary is missing, `semgrep install-semgrep-pro`
+# is invoked at entrypoint time. The binary (~376MB) downloads to site-packages
+# and is NOT persisted across `docker rm` — fresh install on each new container.
+# On 401/403 from Semgrep API, Pro install fails gracefully and we fall back
+# to OSS mode (unless REQUIRE_PRO=true). Set INSTALL_PRO_ON_START=false to
+# disable auto-install even when token is present.
+_resolve_pro_bin_path() {
+    # Ask semgrep itself where the Pro binary lives (handles python minor shifts).
+    PRO_BIN_PATH="$(python3 -c 'from semgrep.semgrep_core import SemgrepCore; import sys; p = SemgrepCore.path(pro=True) if hasattr(SemgrepCore, "path") else ""; print(p or "")' 2>/dev/null || true)"
+    if [[ -z "$PRO_BIN_PATH" ]]; then
+        # Fallback: derive from semgrep-core path
+        local core
+        core="$(command -v semgrep-core 2>/dev/null || true)"
+        if [[ -z "$core" ]]; then
+            core="$(python3 -c 'import os, semgrep; print(os.path.join(os.path.dirname(semgrep.__file__), "bin", "semgrep-core"))' 2>/dev/null || true)"
+        fi
+        if [[ -n "$core" ]]; then
+            PRO_BIN_PATH="$(dirname "$core")/semgrep-core-proprietary"
+        fi
+    fi
+}
+
 resolve_pro_mode() {
     REQUIRE_PRO="${REQUIRE_PRO:-false}"
+    INSTALL_PRO_ON_START="${INSTALL_PRO_ON_START:-true}"
     SEMGREP_APP_TOKEN="${SEMGREP_APP_TOKEN:-}"
+    PRO_BIN_PATH=""
 
-    if [[ -n "$SEMGREP_APP_TOKEN" ]]; then
-        echo "Pro mode: SEMGREP_APP_TOKEN present — token will be forwarded to MCP subprocess"
-        export SEMGREP_APP_TOKEN
-        PRO_MODE_DISPLAY="Pro (token present)"
-    else
+    if [[ -z "$SEMGREP_APP_TOKEN" ]]; then
         if is_true "$REQUIRE_PRO"; then
             echo "ERROR: REQUIRE_PRO=true but SEMGREP_APP_TOKEN is unset. Exiting." >&2
             exit 1
@@ -603,6 +627,53 @@ resolve_pro_mode() {
         : "${SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED:=true}"
         export SEMGREP_FINDINGS_DISABLED SEMGREP_SCAN_REMOTE_DISABLED SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED
         PRO_MODE_DISPLAY="OSS (no token)"
+        export PRO_MODE_DISPLAY
+        return
+    fi
+
+    # Token present — forward to child processes
+    export SEMGREP_APP_TOKEN
+    _resolve_pro_bin_path
+
+    if [[ -n "$PRO_BIN_PATH" && -x "$PRO_BIN_PATH" ]]; then
+        echo "Pro mode: Pro Engine binary cached at $PRO_BIN_PATH"
+        PRO_MODE_DISPLAY="Pro (cached binary)"
+        export PRO_MODE_DISPLAY
+        return
+    fi
+
+    if ! is_true "$INSTALL_PRO_ON_START"; then
+        echo "Pro mode: SEMGREP_APP_TOKEN present but INSTALL_PRO_ON_START=false — Pro tools will fail until binary is installed manually"
+        PRO_MODE_DISPLAY="Pro (token only, binary missing)"
+        export PRO_MODE_DISPLAY
+        return
+    fi
+
+    # Auto-install Pro Engine
+    echo "Pro mode: SEMGREP_APP_TOKEN present, Pro Engine binary missing — authenticating and downloading (~376MB, may take 30-120s)..."
+    local install_log
+    install_log="$(mktemp /tmp/semgrep-pro-install.XXXXXX)"
+    if semgrep install-semgrep-pro >"$install_log" 2>&1; then
+        echo "Pro Engine installed successfully:"
+        grep -E 'Successfully|installed|version' "$install_log" | tail -3 || head -3 "$install_log"
+        _resolve_pro_bin_path
+        PRO_MODE_DISPLAY="Pro (installed this run)"
+        rm -f "$install_log"
+    else
+        local rc=$?
+        echo "WARNING: Pro Engine install failed (exit $rc). Last lines of install log:" >&2
+        tail -8 "$install_log" >&2
+        rm -f "$install_log"
+        if is_true "$REQUIRE_PRO"; then
+            echo "ERROR: REQUIRE_PRO=true but Pro install failed. Exiting." >&2
+            exit 1
+        fi
+        echo "Falling back to OSS mode. Common causes: invalid SEMGREP_APP_TOKEN (401), deployment lacks Pro entitlement (403), or network egress blocked to semgrep.dev." >&2
+        : "${SEMGREP_FINDINGS_DISABLED:=true}"
+        : "${SEMGREP_SCAN_REMOTE_DISABLED:=true}"
+        : "${SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED:=true}"
+        export SEMGREP_FINDINGS_DISABLED SEMGREP_SCAN_REMOTE_DISABLED SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED
+        PRO_MODE_DISPLAY="OSS (Pro install failed, token present)"
     fi
 
     export PRO_MODE_DISPLAY

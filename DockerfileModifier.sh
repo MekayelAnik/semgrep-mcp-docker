@@ -104,8 +104,11 @@ ENV PORT=\${PORT} \\
 
 EXPOSE \${PORT}/tcp \${PORT}/udp
 
-# L7 health check via supergateway /healthz through HAProxy frontend
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \\
+# L7 health check via supergateway /healthz through HAProxy frontend.
+# start-period=240s absorbs Pro Engine auto-install (~376MB download,
+# triggered when SEMGREP_APP_TOKEN is set and binary is missing) plus
+# supergateway + HAProxy boot. Ordinary OSS cold start completes within 30s.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=240s --retries=3 \\
     CMD /usr/local/bin/healthcheck.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

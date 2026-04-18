@@ -80,7 +80,9 @@ services:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
       interval: 30s
       timeout: 10s
-      start_period: 30s
+      # 240s absorbs Pro Engine auto-install (~376MB) when SEMGREP_APP_TOKEN
+      # is set and binary is missing. OSS cold start completes within 30s.
+      start_period: 240s
       retries: 3
 
 volumes:
