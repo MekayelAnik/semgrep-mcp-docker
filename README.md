@@ -1,9 +1,22 @@
+<p align="center"><img src="https://semgrep.dev/build/assets/semgrep-logo-dark-F_zJCZNg.svg" alt="Semgrep Logo" width="260"></p>
+
+<p align="center">
+  <a href="https://hub.docker.com/r/mekayelanik/semgrep-mcp-server"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/mekayelanik/semgrep-mcp-server?style=flat-square&logo=docker"></a>
+  <a href="https://hub.docker.com/r/mekayelanik/semgrep-mcp-server"><img alt="Docker Stars" src="https://img.shields.io/docker/stars/mekayelanik/semgrep-mcp-server?style=flat-square&logo=docker"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/pkgs/container/semgrep-mcp-server"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-ghcr.io%2Fmekayelanik%2Fsemgrep--mcp--server-blue?style=flat-square&logo=github"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue?style=flat-square"></a>
+  <a href="https://hub.docker.com/r/mekayelanik/semgrep-mcp-server"><img alt="Platforms" src="https://img.shields.io/badge/Platforms-amd64%20%7C%20arm64-lightgrey?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/forks"><img alt="GitHub Forks" src="https://img.shields.io/github/forks/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/issues"><img alt="GitHub Issues" src="https://img.shields.io/github/issues/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/commits/main"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
+</p>
+
 # Semgrep MCP Server
 
-## Multi-Architecture Docker Image for Semgrep's Model Context Protocol Server
+## Unofficial Multi-Architecture Docker Image for Semgrep's Model Context Protocol Server
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/mekayelanik/semgrep-mcp-server.svg)](https://hub.docker.com/r/mekayelanik/semgrep-mcp-server)
-[![Docker Image Size](https://img.shields.io/docker/image-size/mekayelanik/semgrep-mcp-server/latest)](https://hub.docker.com/r/mekayelanik/semgrep-mcp-server)
+> **⚠️ Unofficial Image** — This is a community-maintained Docker image packaging the official [Semgrep CLI](https://github.com/semgrep/semgrep) (LGPL-2.1) with runtime tooling. It is **not affiliated with, endorsed by, or supported by Semgrep Inc.** For official Semgrep offerings see [semgrep.dev](https://semgrep.dev). Semgrep® is a trademark of Semgrep Inc.; this project makes nominative use only to indicate the software packaged.
 
 Runs the official `semgrep mcp` server (built into Semgrep ≥ 1.146.0) wrapped with [supergateway](https://github.com/supercorp-ai/supergateway) for stdio→HTTP/SSE/WS bridging, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limiting, IP ACL, and Bearer-token API key authentication.
 
@@ -24,8 +37,13 @@ Runs the official `semgrep mcp` server (built into Semgrep ≥ 1.146.0) wrapped 
 - [Support & License](#support--license)
 
 ## 😎 Buy Me a Coffee ☕︎
+**Your support encourages me to keep creating/supporting my open-source projects.** If you found value in this project, you can buy me a coffee to keep me inspired.
 
-If this image saved you time, [buy me a coffee](https://buymeacoffee.com/mekayelanik) — donations keep the build pipeline running.
+<p align="center">
+  <a href="https://07mekayel07.gumroad.com/coffee" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" width="217" height="60">
+  </a>
+</p>
 
 ## Overview
 
@@ -509,8 +527,19 @@ If this image saved you time, [buy me a coffee](https://buymeacoffee.com/mekayel
 
 PRs welcome. Keep changes minimal, match existing code style, preserve universal (non-opinionated) defaults.
 
-### License
+### License & Attribution
 
-MIT — see [LICENSE](./LICENSE).
+This Docker packaging is licensed **MIT** — see [LICENSE](./LICENSE).
 
-Semgrep itself is licensed separately (LGPL-2.1 with the "Semgrep Registry Terms of Service" for cloud-hosted rules). See [semgrep.dev/legal](https://semgrep.dev/legal/).
+The software packaged inside the image retains its original licensing:
+- **Semgrep CLI** — LGPL-2.1 (see [github.com/semgrep/semgrep/blob/develop/LICENSE](https://github.com/semgrep/semgrep/blob/develop/LICENSE))
+- **Semgrep Registry rules** (fetched at runtime, not bundled) — governed by Semgrep's Terms of Service, see [semgrep.dev/legal](https://semgrep.dev/legal/)
+- **Semgrep Pro Engine** (requires your own `SEMGREP_APP_TOKEN`, not bundled) — proprietary, see [semgrep.dev/legal](https://semgrep.dev/legal/)
+- **supergateway** — MIT (see [github.com/supercorp-ai/supergateway](https://github.com/supercorp-ai/supergateway))
+- **HAProxy** — GPL-2.0-or-later (see [haproxy.org](https://www.haproxy.org/))
+
+### Trademark Notice
+
+**Semgrep®** is a registered trademark of Semgrep Inc. This project is an **unofficial community packaging** and is not affiliated with, sponsored by, or endorsed by Semgrep Inc. The Semgrep name and logo are used only nominatively to identify the software packaged inside this image.
+
+For official Semgrep products and support, visit [semgrep.dev](https://semgrep.dev).
