@@ -1,0 +1,90 @@
+# docker-compose.yml — Semgrep MCP Server
+# Universal config: works OSS out-of-the-box; set SEMGREP_APP_TOKEN to unlock Pro tools.
+
+services:
+  semgrep-mcp:
+    image: mekayelanik/semgrep-mcp-server:latest
+    container_name: semgrep-mcp
+    restart: unless-stopped
+    environment:
+      # --- Container config ---
+      PORT: 7055                    # External HAProxy port
+      INTERNAL_PORT: 37055          # Internal supergateway port (loopback)
+      PUID: 1000
+      PGID: 1000
+      TZ: UTC
+
+      # --- Transport ---
+      PROTOCOL: SHTTP               # SHTTP | SSE | WS
+      ENABLE_HTTPS: "false"         # Flip to "true" for TLS (auto-generates self-signed cert)
+      HTTP_VERSION_MODE: auto       # auto | h1 | h2 | h3 | h1+h2 | all
+
+      # --- Auth (HAProxy Bearer gate) ---
+      # API_KEY: "your-long-random-token"   # Uncomment to require Bearer auth
+      # CORS: "*"                           # Uncomment for permissive CORS; or "https://example.com"
+
+      # --- Rate limiting (optional) ---
+      # RATE_LIMIT: 100                     # Max requests per period (0 = disabled)
+      # RATE_LIMIT_PERIOD: "10s"            # Duration: 10s, 1m, 1h, 1d
+      # MAX_CONNECTIONS_PER_IP: 20          # Max concurrent connections per source IP (0 = disabled)
+
+      # --- IP access control (optional) ---
+      # IP_ALLOWLIST: "10.0.0.0/8,192.168.0.0/16"
+      # IP_BLOCKLIST: "203.0.113.0/24"
+
+      # --- Semgrep Pro Engine gate ---
+      # Leave SEMGREP_APP_TOKEN unset for OSS mode (6 tools available).
+      # Set it to enable full Pro mode (9 tools, AppSec Platform integration).
+      # SEMGREP_APP_TOKEN: "${SEMGREP_APP_TOKEN}"
+      # REQUIRE_PRO: "false"        # Set "true" to fail-fast if token is missing
+
+      # --- Semgrep runtime ---
+      SEMGREP_RULES: "p/default"    # Default ruleset; override e.g. "p/python,p/owasp-top-ten,p/secrets"
+      SEMGREP_METRICS: "off"
+      SEMGREP_SEND_METRICS: "off"
+
+      # --- Per-tool overrides (upstream env contract) ---
+      # Set to "true" to disable a specific MCP tool
+      # SEMGREP_RULE_SCHEMA_DISABLED: "false"
+      # GET_SUPPORTED_LANGUAGES_DISABLED: "false"
+      # SEMGREP_FINDINGS_DISABLED: "false"         # Auto-true in OSS mode
+      # SEMGREP_SCAN_WITH_CUSTOM_RULE_DISABLED: "false"
+      # SEMGREP_SCAN_DISABLED: "false"
+      # SEMGREP_SCAN_REMOTE_DISABLED: "false"      # Auto-true in OSS mode
+      # GET_ABSTRACT_SYNTAX_TREE_DISABLED: "false"
+      # SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED: "false" # Auto-true in OSS mode
+
+      # --- Backend toggle ---
+      # USE_SEMGREP_RPC: "false"    # Set "true" to use RPC backend over pysemgrep CLI
+
+    ports:
+      - "7055:7055/tcp"
+      - "7055:7055/udp"             # QUIC/HTTP3 when HTTP_VERSION_MODE=auto|h3|all
+
+    volumes:
+      # Persistent semgrep cache + rule-registry (always on — skip network re-fetch on restart)
+      - semgrep-cache:/home/semgrep/.semgrep
+      - semgrep-registry:/home/semgrep/.cache/semgrep
+
+      # --- Code directory (host path set via CODE_DIR env or .env file) ---
+      # Container target is always /code (read-only). Clients pass paths under /code.
+      - ${CODE_DIR:-./code}:/code:ro
+
+      # --- Custom rules (host path set via CUSTOM_RULES_DIR env) ---
+      - ${CUSTOM_RULES_DIR:-./custom-rules}:/opt/custom-rules:ro
+
+      # --- Optional: own TLS certs (otherwise self-signed auto-generated) ---
+      # - ${CERTS_DIR:-./certs}:/etc/haproxy/certs:ro
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  semgrep-cache:
+    driver: local
+  semgrep-registry:
+    driver: local

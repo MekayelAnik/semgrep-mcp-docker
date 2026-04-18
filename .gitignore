@@ -1,0 +1,48 @@
+# Generated Dockerfile (emitted by DockerfileModifier.sh at build time)
+Dockerfile.semgrep-mcp-server
+Dockerfile.semgrep-mcp-server.*
+
+# Publication build flag (created by CI, not committed)
+build_data/publication
+
+# Local build state
+.buildx-cache/
+build-metadata.json
+
+# User-populated runtime env (keep .env.example tracked)
+.env
+!.env.example
+
+# Sample mount targets (user scan targets + custom rules)
+/code/
+/custom-rules/
+/certs/
+
+# TLS material
+*.pem
+*.key
+*.crt
+!resources/*.template
+
+# OS + editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# Python artefacts (if someone runs pip locally for testing)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node artefacts
+node_modules/
+
+# Logs + tmp
+*.log
+/tmp/

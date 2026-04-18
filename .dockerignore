@@ -1,0 +1,30 @@
+# Minimize build context
+.git/
+.github/
+.gitignore
+.dockerignore
+README.md
+LICENSE
+CLAUDE.md
+renovate.json
+docker-compose.yml
+Dockerfile.semgrep-mcp-server*
+!Dockerfile.semgrep-mcp-server
+
+# Local artefacts
+code/
+custom-rules/
+certs/
+*.log
+*.pem
+*.key
+*.crt
+!resources/*.template
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
