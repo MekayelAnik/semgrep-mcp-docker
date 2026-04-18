@@ -737,10 +737,22 @@ start_mcp_server() {
     # Upstream `semgrep mcp` accepts only: -t/--transport, -p/--port, -k/--hook, -a/--agent
     local mcp_server_cmd="semgrep mcp -t stdio"
 
+    # Session timeout: 1 h default. Keeps stateful SHTTP sessions alive across
+    # long scans + idle gaps in interactive clients. Override with SESSION_TIMEOUT_MS.
+    local session_timeout_ms="${SESSION_TIMEOUT_MS:-3600000}"
+
     case "${PROTOCOL^^}" in
         SHTTP|STREAMABLEHTTP)
-            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SHTTP/streamableHttp"
+            # --stateful is REQUIRED for semgrep: upstream `semgrep mcp` issues
+            # server-initiated `roots/list` reverse-RPC on most tool calls
+            # (get_supported_languages, semgrep_rule_schema, semgrep_scan,
+            # get_abstract_syntax_tree, etc). Stateless mode respawns the child
+            # per POST so the child can never receive the client's roots
+            # response — every such tool call hangs. Stateful mode keeps
+            # one persistent child + correlates server→client requests to
+            # the right SSE stream. See supergateway --help.
+            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stateful --sessionTimeout "$session_timeout_ms" --stdio "$mcp_server_cmd")
+            PROTOCOL_DISPLAY="SHTTP/streamableHttp (stateful, sessionTimeout=${session_timeout_ms}ms)"
             ;;
         SSE)
             CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --ssePath /sse --outputTransport sse --healthEndpoint /healthz --stdio "$mcp_server_cmd")
@@ -752,8 +764,8 @@ start_mcp_server() {
             ;;
         *)
             echo "Invalid PROTOCOL='${PROTOCOL}', using default ${DEFAULT_PROTOCOL}"
-            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SHTTP/streamableHttp"
+            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stateful --sessionTimeout "$session_timeout_ms" --stdio "$mcp_server_cmd")
+            PROTOCOL_DISPLAY="SHTTP/streamableHttp (stateful, sessionTimeout=${session_timeout_ms}ms)"
             ;;
     esac
 
