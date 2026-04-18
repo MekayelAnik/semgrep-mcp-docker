@@ -720,6 +720,17 @@ start_mcp_server() {
     # Consumed by semgrep_scan / semgrep_scan_remote subprocess; overridden by explicit --config
     # in semgrep_scan_with_custom_rule and semgrep_scan_supply_chain.
     export SEMGREP_RULES="${SEMGREP_RULES:-p/default}"
+    # HARD LOCK: supergateway must always talk to `semgrep mcp` over stdio.
+    # Client-facing transport (SHTTP/SSE/WS/stdio) is a supergateway-level choice
+    # controlled by $PROTOCOL — supergateway bridges it to an stdio child. If the
+    # user sets MCP_TRANSPORT=streamable-http expecting to change the upstream
+    # link, it would conflict with how this image is packaged. We force stdio here
+    # and warn if overridden. CLI flag `-t stdio` also beats envvar but belt-and-
+    # suspenders is cheap and makes the contract explicit.
+    if [[ -n "${MCP_TRANSPORT:-}" && "${MCP_TRANSPORT}" != "stdio" ]]; then
+        echo "WARNING: MCP_TRANSPORT='${MCP_TRANSPORT}' ignored — supergateway→semgrep link is always stdio in this image. Client transport is controlled by PROTOCOL env (SHTTP/SSE/WS)." >&2
+    fi
+    export MCP_TRANSPORT="stdio"
     # Line-buffer python so supergateway sees stdio events immediately
     export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 
