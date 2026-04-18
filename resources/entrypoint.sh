@@ -621,11 +621,16 @@ resolve_pro_mode() {
             exit 1
         fi
         echo "OSS mode: SEMGREP_APP_TOKEN unset — auto-disabling cloud-only tools"
-        # Only auto-disable if user hasn't explicitly set them
+        # Only auto-disable if user hasn't explicitly set them.
+        # NOTE: do NOT auto-set SEMGREP_SCAN_REMOTE_DISABLED — stdio transport (which
+        # supergateway always wraps) hard-strips that tool via `deregister_tools()` in
+        # semgrep/mcp/server.py. If the env var *also* gates registration to skip the
+        # tool, `deregister_tools()` calls `del dict["semgrep_scan_remote"]` on an
+        # already-absent key → KeyError crashes the MCP subprocess on every request.
+        # Upstream bug: server.py:1382 should use `pop(key, None)`.
         : "${SEMGREP_FINDINGS_DISABLED:=true}"
-        : "${SEMGREP_SCAN_REMOTE_DISABLED:=true}"
         : "${SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED:=true}"
-        export SEMGREP_FINDINGS_DISABLED SEMGREP_SCAN_REMOTE_DISABLED SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED
+        export SEMGREP_FINDINGS_DISABLED SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED
         PRO_MODE_DISPLAY="OSS (no token)"
         export PRO_MODE_DISPLAY
         return
@@ -669,10 +674,11 @@ resolve_pro_mode() {
             exit 1
         fi
         echo "Falling back to OSS mode. Common causes: invalid SEMGREP_APP_TOKEN (401), deployment lacks Pro entitlement (403), or network egress blocked to semgrep.dev." >&2
+        # See note in OSS-mode branch above: do NOT auto-set SEMGREP_SCAN_REMOTE_DISABLED
+        # (collides with stdio transport's hardcoded deregister → KeyError crash).
         : "${SEMGREP_FINDINGS_DISABLED:=true}"
-        : "${SEMGREP_SCAN_REMOTE_DISABLED:=true}"
         : "${SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED:=true}"
-        export SEMGREP_FINDINGS_DISABLED SEMGREP_SCAN_REMOTE_DISABLED SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED
+        export SEMGREP_FINDINGS_DISABLED SEMGREP_SCAN_SUPPLY_CHAIN_DISABLED
         PRO_MODE_DISPLAY="OSS (Pro install failed, token present)"
     fi
 
