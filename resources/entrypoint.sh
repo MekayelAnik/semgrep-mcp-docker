@@ -708,6 +708,12 @@ start_mcp_server() {
     # Default metrics off (user opt-in)
     export SEMGREP_METRICS="${SEMGREP_METRICS:-off}"
     export SEMGREP_SEND_METRICS="${SEMGREP_SEND_METRICS:-off}"
+    # Default ruleset: p/default (offline-safe, no project URL leak to auto).
+    # Space-separated for multi-ruleset: SEMGREP_RULES="p/default p/python /opt/custom-rules/local.yaml"
+    # Wired to `semgrep scan -f/--config` (multiple=True) at cli/src/semgrep/commands/scan.py:632.
+    # Consumed by semgrep_scan / semgrep_scan_remote subprocess; overridden by explicit --config
+    # in semgrep_scan_with_custom_rule and semgrep_scan_supply_chain.
+    export SEMGREP_RULES="${SEMGREP_RULES:-p/default}"
     # Line-buffer python so supergateway sees stdio events immediately
     export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 

@@ -14,11 +14,11 @@
 
 # Semgrep MCP Server
 
-## Unofficial Multi-Architecture Docker Image for Semgrep's Model Context Protocol Server
+## Unofficial Multi-Architecture Docker Image for Semgrep's MCP Server
 
-> **⚠️ Unofficial Image** — This is a community-maintained Docker image packaging the official [Semgrep CLI](https://github.com/semgrep/semgrep) (LGPL-2.1) with runtime tooling. It is **not affiliated with, endorsed by, or supported by Semgrep Inc.** For official Semgrep offerings see [semgrep.dev](https://semgrep.dev). Semgrep® is a trademark of Semgrep Inc.; this project makes nominative use only to indicate the software packaged.
+> **⚠️ Unofficial image** — community-maintained, packages the official [Semgrep CLI](https://github.com/semgrep/semgrep) (LGPL-2.1). **Not affiliated with / endorsed by Semgrep Inc.** Official: [semgrep.dev](https://semgrep.dev). Semgrep® is a trademark of Semgrep Inc.; nominative use only.
 
-Runs the official `semgrep mcp` server (built into Semgrep ≥ 1.146.0) wrapped with [supergateway](https://github.com/supercorp-ai/supergateway) for stdio→HTTP/SSE/WS bridging, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limiting, IP ACL, and Bearer-token API key authentication.
+Runs official `semgrep mcp` (built into Semgrep ≥ 1.146.0) wrapped with [supergateway](https://github.com/supercorp-ai/supergateway) for stdio→HTTP/SSE/WS bridging, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limit, IP ACL, Bearer auth.
 
 ## Table of Contents
 
@@ -29,6 +29,7 @@ Runs the official `semgrep mcp` server (built into Semgrep ≥ 1.146.0) wrapped 
 - [Configuration](#configuration)
 - [MCP Client Configuration](#mcp-client-configuration)
 - [Pro Engine Mode](#pro-engine-mode)
+- [Ruleset Selection](#ruleset-selection)
 - [Custom Rules](#custom-rules)
 - [Network Configuration](#network-configuration)
 - [Updating](#updating)
@@ -47,20 +48,20 @@ Runs the official `semgrep mcp` server (built into Semgrep ≥ 1.146.0) wrapped 
 
 ## Overview
 
-Semgrep MCP exposes Semgrep's security scanner as a set of Model Context Protocol tools AI coding assistants (Claude Code, Cursor, Windsurf, VS Code, Claude Desktop, ChatGPT) can call directly. This image packages the official upstream server in a production-ready container with no cloud dependencies required for OSS use.
+Semgrep MCP exposes Semgrep's security scanner as Model Context Protocol tools any AI coding assistant (Claude Code, Cursor, Windsurf, VS Code, Claude Desktop, ChatGPT) can call directly. This image packages the official upstream server in a production-ready container — OSS works with no cloud dependencies.
 
 ### Key Features
 
-- **Official Upstream** — uses `semgrep mcp` built into Semgrep CLI (≥ 1.146.0), not a third-party wrapper
+- **Official upstream** — uses `semgrep mcp` built into Semgrep CLI (≥ 1.146.0)
 - **9 MCP Tools + 2 Prompts + 2 Resources** (see [Tool Reference](#tool-reference))
-- **Universal OSS + Pro Modes** — works out of the box without any token; auto-unlocks Pro features when `SEMGREP_APP_TOKEN` is set
-- **Multi-Architecture** — native `linux/amd64` and `linux/arm64`
-- **Multiple Transports** — SHTTP (streamable HTTP), SSE, WebSocket via supergateway
-- **Secure by Default** — Alpine-based, minimal attack surface, HAProxy TLS with self-signed cert auto-gen, Bearer-token auth, CORS validation, rate limiting, IP ACL
-- **HTTP/2 + HTTP/3 (QUIC)** — auto-negotiation or explicit version selection
-- **PUID/PGID** — runs as non-root user with configurable UID/GID mapping
-- **Health Checks** — supergateway `/healthz` endpoint passes through HAProxy
-- **Persistent Cache** — semgrep rule registry cached across restarts
+- **Universal OSS + Pro** — works without a token; auto-unlocks Pro when `SEMGREP_APP_TOKEN` is set
+- **Multi-arch** — native `linux/amd64` + `linux/arm64`
+- **Multiple transports** — SHTTP (streamable HTTP), SSE, WebSocket via supergateway
+- **Secure defaults** — Alpine base, HAProxy TLS (auto self-signed), Bearer auth, CORS, rate limit, IP ACL
+- **HTTP/2 + HTTP/3 (QUIC)** — auto-negotiate or explicit version
+- **PUID/PGID** — non-root with configurable UID/GID
+- **Health checks** — `/healthz` endpoint through HAProxy
+- **Persistent cache** — rule registry cached across restarts
 
 ### Tool Reference
 
@@ -101,10 +102,9 @@ Semgrep MCP exposes Semgrep's security scanner as a set of Model Context Protoco
 
 ### System Requirements
 
-- Docker Engine ≥ 24.0
-- Linux kernel ≥ 5.4 (for QUIC/HTTP3 UDP)
-- ≥ 512 MB RAM (small codebases); ≥ 2 GB for large repos
-- Outbound HTTPS access to `semgrep.dev` and `raw.githubusercontent.com` for rule registry
+- Docker ≥ 24.0 · Linux kernel ≥ 5.4 (QUIC/HTTP3 UDP)
+- RAM: ≥ 512 MB small codebases; ≥ 2 GB large repos
+- Outbound HTTPS to `semgrep.dev` + `raw.githubusercontent.com` for rule registry
 
 ## Quick Start
 
@@ -145,16 +145,11 @@ volumes:
 ### Docker CLI
 
 ```bash
-docker run -d \
-  --name semgrep-mcp \
+docker run -d --name semgrep-mcp --restart unless-stopped \
   -p 7055:7055/tcp -p 7055:7055/udp \
-  -e PUID=1000 -e PGID=1000 -e TZ=UTC \
-  -e PROTOCOL=SHTTP \
-  -v "$PWD/code:/code:ro" \
-  -v "$PWD/custom-rules:/opt/custom-rules:ro" \
-  -v semgrep-cache:/home/semgrep/.semgrep \
-  -v semgrep-registry:/home/semgrep/.cache/semgrep \
-  --restart unless-stopped \
+  -e PUID=1000 -e PGID=1000 -e TZ=UTC -e PROTOCOL=SHTTP \
+  -v "$PWD/code:/code:ro" -v "$PWD/custom-rules:/opt/custom-rules:ro" \
+  -v semgrep-cache:/home/semgrep/.semgrep -v semgrep-registry:/home/semgrep/.cache/semgrep \
   mekayelanik/semgrep-mcp-server:latest
 ```
 
@@ -188,7 +183,7 @@ docker run -d \
 |:---------|:-------:|:------------|
 | `SEMGREP_APP_TOKEN` | _(unset)_ | AppSec Platform token — enables Pro tools |
 | `REQUIRE_PRO` | `false` | If `true`, exits 1 when token is missing |
-| `SEMGREP_RULES` | `p/default` | Default ruleset(s) — comma-separated |
+| `SEMGREP_RULES` | `p/default` | Default ruleset(s) — **space-separated** list (see [Ruleset Selection](#ruleset-selection)) |
 | `SEMGREP_METRICS` | `off` | Telemetry (`on` / `off`) |
 | `SEMGREP_SEND_METRICS` | `off` | Telemetry (`on` / `off`) |
 | `USE_SEMGREP_RPC` | _(unset)_ | Set `true` to use RPC backend over pysemgrep CLI |
@@ -236,19 +231,16 @@ Set any of these to `true` to disable the corresponding MCP tool. In OSS mode, t
 ### HTTPS and HTTP Version Notes
 
 - `ENABLE_HTTPS=false` → always HTTP/1.1 (TLS required for HTTP/2 and HTTP/3)
-- `HTTP_VERSION_MODE=auto` with TLS → negotiates HTTP/1.1 + HTTP/2 + HTTP/3 (if HAProxy QUIC build present)
-- HTTP/3 requires UDP port mapping (`-p 7055:7055/udp`)
+- `HTTP_VERSION_MODE=auto` with TLS → negotiates HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC build required)
+- HTTP/3 requires UDP mapping (`-p 7055:7055/udp`)
 
 ### API Key Authentication Notes
 
-Clients must send `Authorization: Bearer <API_KEY>`. Health checks on `/healthz` always bypass auth. Token validation is constant-time at the HAProxy layer. Minimum length 5 chars; maximum 256. Whitespace/control chars are rejected.
+Clients send `Authorization: Bearer <API_KEY>`. `/healthz` bypasses auth. Constant-time validation in HAProxy. Length 5-256 chars; no whitespace/control chars.
 
 ### User & Group IDs
 
-Find yours:
-```bash
-id $USER
-```
+Find yours: `id $USER`
 
 ### Timezone Examples
 
@@ -264,18 +256,20 @@ id $USER
 | SSE | `http[s]://host:7055/sse` (events), `http[s]://host:7055/message` (POST) |
 | WebSocket | `ws[s]://host:7055/message` |
 
-### Claude Code
+### CLI-based clients
 
 ```bash
+# Claude Code
 claude mcp add --transport http semgrep http://host-ip:7055/mcp
-# With auth:
-claude mcp add --transport http semgrep http://host-ip:7055/mcp \
-  --header "Authorization: Bearer your-token"
+# with auth: append --header "Authorization: Bearer your-token"
+
+# Codex CLI
+codex mcp add semgrep --url http://host-ip:7055/mcp --transport http
 ```
 
-### Claude Desktop App
+### JSON-config clients (Claude Desktop / Cursor / Windsurf / VS Code)
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Config paths: Claude Desktop → `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) · Cursor → `~/.cursor/mcp.json` · Windsurf → `~/.codeium/windsurf/mcp_config.json`.
 
 ```json
 {
@@ -287,46 +281,9 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 }
 ```
 
-### Cursor
+Key varies per client: Claude Desktop uses `transport.url`, Cursor uses `url`, Windsurf uses `serverUrl`. **VS Code (Cline / Roo-Cline):** Settings → MCP Servers → Add → Name=`semgrep`, Transport=`http`, URL=`http://host-ip:7055/mcp`.
 
-Edit `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "semgrep": {
-      "url": "http://host-ip:7055/mcp"
-    }
-  }
-}
-```
-
-### VS Code (Cline / Roo-Cline)
-
-Settings → MCP Servers → Add:
-- Name: `semgrep`
-- Transport: `http`
-- URL: `http://host-ip:7055/mcp`
-
-### Codex CLI
-
-```bash
-codex mcp add semgrep --url http://host-ip:7055/mcp --transport http
-```
-
-### Windsurf
-
-```json
-{
-  "mcpServers": {
-    "semgrep": {
-      "serverUrl": "http://host-ip:7055/mcp"
-    }
-  }
-}
-```
-
-### Testing Configuration
+### Testing
 
 ```bash
 npx -y @modelcontextprotocol/inspector http://host-ip:7055/mcp
@@ -338,54 +295,145 @@ Semgrep Pro (AppSec Platform) unlocks 3 additional tools. To enable:
 
 1. Get a token from [semgrep.dev/orgs/-/settings/tokens](https://semgrep.dev/orgs/-/settings/tokens)
 2. Set `SEMGREP_APP_TOKEN=<your-token>` in compose or via `-e`
-3. Restart the container — the entrypoint auto-runs `semgrep login` and unlocks:
-   - `semgrep_findings` (fetch findings from AppSec Platform)
-   - `semgrep_scan_remote` (scan hosted repositories)
-   - `semgrep_scan_supply_chain` (SCA scanning)
+3. Restart container — entrypoint forwards token to `semgrep mcp` subprocess (read directly from env every tool call; **no `semgrep login`**), auto-downloads Pro Engine binary (~376 MB) if missing, and unlocks `semgrep_findings` (AppSec platform findings), `semgrep_scan_remote` (hosted repo scan), `semgrep_scan_supply_chain` (SCA).
 
-**Strict mode:** set `REQUIRE_PRO=true` alongside the token to fail-fast if the token is missing — useful for CI and production deployments.
+**Pro binary auto-install:** `INSTALL_PRO_ON_START` (default `true`). On 401/403/network fail → OSS fallback with three Pro tools auto-disabled. Binary lives in `site-packages`, not in `/home/semgrep/.semgrep` volume — intentional, keeps binary version matched to Semgrep CLI on image upgrade.
+
+**Strict mode:** `REQUIRE_PRO=true` — exits 1 if token missing OR Pro install fails. For CI / prod.
 
 **OSS mode** works without any setup. Default ruleset is `p/default` (curated by Semgrep); change via `SEMGREP_RULES` env.
 
-## Code & Rules Directories
+## Ruleset Selection
 
-Both the scan target directory and the custom-rules directory are env-configurable via a `.env` file or shell env vars. Compose auto-loads `.env` next to `docker-compose.yml`.
+`SEMGREP_RULES` stacks any number of registry packs, local YAMLs, or HTTPS URLs in a single scan. Wired to upstream `-f/--config` (Click `multiple=True`). Rules auto-dedup by ID.
 
-### `.env` file
+### Syntax — space-separated (NOT comma)
 
 ```bash
-cp .env.example .env
-# edit .env
+SEMGREP_RULES="p/default p/python"
+SEMGREP_RULES="p/default p/python p/owasp-top-ten /opt/custom-rules/local_rules.yaml"
 ```
+
+Equivalent CLI: `semgrep scan --config p/default --config p/python --config /opt/custom-rules/local_rules.yaml`
+
+### Value types
+
+| Form | Example | Meaning |
+|:-----|:--------|:--------|
+| `p/<pack>` | `p/python` | Registry ruleset |
+| `r/<rule-id>` | `r/python.lang.security.audit.eval-detected` | Single registry rule |
+| Absolute path | `/opt/custom-rules/local.yaml` | Local YAML inside container |
+| HTTPS URL | `https://example.com/rules.yaml` | Remote YAML |
+| `auto` | `auto` | Cloud auto-config (logs project URL) |
+| `supply-chain` | `supply-chain` | SCA scan (Pro) |
+
+> Local paths must be **absolute + valid inside the container**. Mount host rules at `/opt/custom-rules` → reference as `/opt/custom-rules/<file>.yaml`. No spaces, no `~` expansion.
+
+### Usage
+
+```yaml
+# docker-compose
+environment:
+  SEMGREP_RULES: "p/default p/python p/django /opt/custom-rules/local_rules.yaml"
+volumes:
+  - ./my-rules:/opt/custom-rules:ro
+```
+
+```bash
+# docker CLI
+docker run -d -e SEMGREP_RULES="p/default p/python p/owasp-top-ten" \
+  -v "$PWD/my-rules:/opt/custom-rules:ro" -p 7055:7055/tcp -p 7055:7055/udp \
+  mekayelanik/semgrep-mcp-server:latest
+
+# verify
+docker exec semgrep-mcp sh -c 'echo $SEMGREP_RULES'
+docker exec semgrep-mcp semgrep scan --dry-run /code 2>&1 | head -20
+```
+
+### Curated registry packs (official, by Semgrep)
+
+**Top-level:** `p/default` (2852) · `p/owasp-top-ten` (2283) · `p/cwe-top-25` (1452) · `p/r2c-security-audit` (225, alias `p/security-audit`) · `p/r2c-best-practices` (125) · `p/secure-defaults` (62) · `p/r2c-bug-scan` (44) · `p/comment` (1556, noisy)
+
+**Languages:** `p/python` (1069) · `p/javascript` (316) · `p/typescript` (316) · `p/nodejs` (248) · `p/java` (239) · `p/csharp` (178) · `p/golang` (113) · `p/kotlin` (71) · `p/ruby` (66) · `p/swift` (64) · `p/rust` (60) · `p/c` (53, also C++) · `p/php` (53) · `p/apex` (22) · `p/ocaml` (27) · `p/elixir` (14) · `p/scala` (12)
+
+**Frameworks:** `p/expressjs` (279) · `p/flask` (220) · `p/django` (183) · `p/fastapi` (152) · `p/koa` (145) · `p/hapi` (141) · `p/nestjs` (31) · `p/play` (23) · `p/brakeman` (19, Rails) · `p/php-laravel` (15) · `p/react-best-practices` (13) · `p/nextjs` (6) · `p/react` (5)
+
+**Vulnerability categories:** `p/sql-injection` (320) · `p/secrets` (269) · `p/gitleaks` (175) · `p/shadow-ai` (140) · `p/command-injection` (100) · `p/xss` (83) · `p/agent-skills` (63) · `p/security-headers` (37) · `p/ai-best-practices` (27) · `p/jwt` (25) · `p/mcp` (19)
+
+**IaC / config:** `p/terraform` (63) · `p/kubernetes` (11) · `p/docker` / `p/dockerfile` (7, Hadolint port) · `p/docker-compose` (6)
+
+**Meta / misc:** `p/c-audit-banned-functions` (100, MS banned-fn list) · `p/phpcs-security-audit` (9) · `p/cpp-audit` (6) · `p/semgrep-rule-lints` (6) · `p/semgrep-misconfigurations` (1)
+
+### High-quality community / third-party packs
+
+| Pack | Rules | Author | Focus |
+|:-----|:-----:|:-------|:------|
+| `p/gitlab` | 544 | GitLab | Multi-language security |
+| `p/findsecbugs` | 286 | Semgrep+GitLab | Java security (FindSecBugs port) |
+| `p/trailofbits` | 120 | Trail of Bits | Python/Go/Rust audit rules ([repo](https://github.com/trailofbits/semgrep-rules)) |
+| `p/bandit` / `p/gitlab-bandit` | 90 | GitLab+Semgrep | Python security (Bandit port) |
+| `p/semgrep-go-correctness` | 66 | Damian Gryski | Go correctness ([repo](https://github.com/dgryski/semgrep-go)) |
+| `p/flawfinder` | 64 | GitLab | C security (Flawfinder port) |
+| `p/insecure-transport` | 53 | Colleen Dai | Cross-language HTTP leaks |
+| `p/smart-contracts` | 50 | Decurity | Solidity / Vyper |
+| `p/mobsfscan` | 43 | MobSF | Android / iOS |
+
+> `p/elttam` is NOT a registry shortcut (only hidden `ben-elttam.*` internal packs exist). Closest equivalent: `p/trailofbits + p/r2c-security-audit`. Live index: [semgrep.dev/api/registry/rulesets](https://semgrep.dev/api/registry/rulesets) · browse: [semgrep.dev/explore](https://semgrep.dev/explore)
+
+### Starter combinations
+
+```bash
+# Python web (Django/Flask/FastAPI)
+SEMGREP_RULES="p/default p/python p/django p/flask p/fastapi p/owasp-top-ten p/secrets"
+# Node.js / TypeScript
+SEMGREP_RULES="p/default p/typescript p/javascript p/nodejs p/expressjs p/owasp-top-ten p/secrets"
+# Go
+SEMGREP_RULES="p/default p/golang p/semgrep-go-correctness p/owasp-top-ten p/secrets"
+# Java / Spring
+SEMGREP_RULES="p/default p/java p/findsecbugs p/owasp-top-ten p/secrets"
+# Rust
+SEMGREP_RULES="p/default p/rust p/trailofbits p/secrets"
+# Audit-grade Python
+SEMGREP_RULES="p/default p/python p/r2c-security-audit p/trailofbits p/owasp-top-ten p/cwe-top-25"
+# IaC (Terraform + K8s + Docker)
+SEMGREP_RULES="p/terraform p/kubernetes p/dockerfile p/docker-compose p/secrets"
+# Smart contracts
+SEMGREP_RULES="p/default p/smart-contracts p/secrets"
+# AI / LLM apps
+SEMGREP_RULES="p/default p/ai-best-practices p/shadow-ai p/agent-skills p/mcp p/secrets"
+```
+
+### Precedence
+
+- `SEMGREP_RULES` drives every `semgrep_scan` / `semgrep_scan_remote` via env-inherited `-f`.
+- `semgrep_scan_with_custom_rule(code_files, rule)` — explicit `rule` YAML **overrides** (not appends) `SEMGREP_RULES`. Stack rules in one `rules:` list.
+- `semgrep_scan_supply_chain` — hardcoded `--config supply-chain`; `SEMGREP_RULES` ignored.
+- Unset → default `p/default`. `auto` → cloud fetch (leaks project URL).
+
+## Code & Rules Directories
+
+Scan target + custom-rules dirs are env-configurable via `.env` or shell env. Compose auto-loads `.env` next to `docker-compose.yml`.
 
 | Variable | Default | Description |
 |:---------|:-------:|:------------|
-| `CODE_DIR` | `./code` | Host path to the code you want semgrep to scan (mounted read-only at `/code`) |
-| `CUSTOM_RULES_DIR` | `./custom-rules` | Host path to your YAML rule files (mounted read-only at `/opt/custom-rules`) |
-
-### Example
+| `CODE_DIR` | `./code` | Host path mounted read-only at `/code` |
+| `CUSTOM_RULES_DIR` | `./custom-rules` | Host path mounted read-only at `/opt/custom-rules` |
 
 ```bash
-# ~/projects/myapp → scanned at /code inside container
-CODE_DIR=/home/user/projects/myapp
-CUSTOM_RULES_DIR=/home/user/semgrep-rules
-```
-
-Then:
-```bash
+cp .env.example .env
+# edit to:
+#   CODE_DIR=/home/user/projects/myapp
+#   CUSTOM_RULES_DIR=/home/user/semgrep-rules
 docker compose up -d
-# Client tool call: semgrep_scan(path="/code/src/main.py")
-```
+# client: semgrep_scan(path="/code/src/main.py")
 
-### Shell env override (no `.env`)
-
-```bash
+# no .env — shell override:
 CODE_DIR=/path/to/code docker compose up -d
 ```
 
 ### Custom rules
 
-Clients invoke `semgrep_scan_with_custom_rule` with the rule as an inline YAML string, OR reference file paths under `/opt/custom-rules/`. See [semgrep.dev/docs/writing-rules](https://semgrep.dev/docs/writing-rules/overview) for rule syntax.
+Clients invoke `semgrep_scan_with_custom_rule` with inline YAML, OR reference paths under `/opt/custom-rules/`. See [semgrep.dev/docs/writing-rules](https://semgrep.dev/docs/writing-rules/overview) for syntax.
 
 ## Network Configuration
 
@@ -450,40 +498,41 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 
 ### Pre-Flight Checklist
 
-1. Container healthy: `docker ps` shows `healthy`
-2. Port open: `curl http://host-ip:7055/healthz`
-3. Logs clean: `docker logs semgrep-mcp` — banner appears, no errors
-4. Outbound network: container can reach `semgrep.dev` and `raw.githubusercontent.com`
+1. `docker ps` shows `healthy`
+2. `curl http://host-ip:7055/healthz` returns 200
+3. `docker logs semgrep-mcp` — banner shown, no errors
+4. Outbound: container reaches `semgrep.dev` + `raw.githubusercontent.com`
 
 ### Common Issues
 
 #### Container Won't Start
 
-- Port conflict: check host port 7055 isn't already bound
-- PUID/PGID invalid: must be positive integers
-- Bad API_KEY: length 5–256 chars, no whitespace
+- Port 7055 already bound on host
+- PUID/PGID not positive integers
+- `API_KEY` wrong length (must be 5–256, no whitespace)
 
 #### Permission Errors
 
-- Volume owned by wrong UID/GID: `chown -R 1000:1000 ./custom-rules`
-- Or set `PUID=$(id -u)` / `PGID=$(id -g)` to match host user
+- Volume owned by wrong UID: `chown -R 1000:1000 ./custom-rules`
+- Or match host: `PUID=$(id -u) PGID=$(id -g)`
 
 #### Client Cannot Connect
 
 - Firewall blocking 7055/tcp or 7055/udp
-- TLS enabled but client using `http://` — switch to `https://`
-- API_KEY set but client not sending `Authorization: Bearer ...`
-- Wrong endpoint path: SHTTP → `/mcp`, SSE → `/sse` + `/message`, WS → `/message`
+- TLS on but client uses `http://` — switch to `https://`
+- `API_KEY` set but client missing `Authorization: Bearer ...`
+- Wrong endpoint: SHTTP=`/mcp`, SSE=`/sse`+`/message`, WS=`/message`
 
 #### Slow First Scan
 
-- Semgrep is downloading + caching the rule registry on first scan. Subsequent scans reuse `~/.cache/semgrep`. Mount a persistent volume (see compose example).
+First scan downloads + caches rule registry. Mount persistent volume (see compose).
 
 #### Pro Tools Disabled
 
-- `SEMGREP_APP_TOKEN` unset → `semgrep_findings`, `semgrep_scan_remote`, `semgrep_scan_supply_chain` auto-disabled
-- Token invalid → check logs for `semgrep login failed`; regenerate at [semgrep.dev/orgs/-/settings/tokens](https://semgrep.dev/orgs/-/settings/tokens)
-- Set `REQUIRE_PRO=true` to fail-fast instead of silent OSS fallback
+- Token unset → three Pro tools auto-disabled
+- Token invalid (401/403) → check logs for `Pro Engine install failed`; regenerate at [semgrep.dev/orgs/-/settings/tokens](https://semgrep.dev/orgs/-/settings/tokens). **Container does NOT run `semgrep login`** — token consumed from env per-call; no login-failed line exists
+- Pro binary install fail (egress blocked / deployment lacks Pro) → OSS fallback. `REQUIRE_PRO=true` to exit 1
+- `INSTALL_PRO_ON_START=false` skips the 376 MB download; install manually via `docker exec semgrep-mcp semgrep install-semgrep-pro`
 
 ### Debug Information
 
@@ -495,26 +544,15 @@ docker logs --tail 200 semgrep-mcp
 
 ## Additional Resources
 
-### Documentation
+**Docs:** [Semgrep](https://semgrep.dev/docs/) · [Semgrep MCP upstream](https://github.com/semgrep/semgrep/tree/develop/cli/src/semgrep/mcp) · [MCP protocol](https://modelcontextprotocol.io/) · [supergateway](https://github.com/supercorp-ai/supergateway)
 
-- [Semgrep Docs](https://semgrep.dev/docs/)
-- [Semgrep MCP Upstream](https://github.com/semgrep/semgrep/tree/develop/cli/src/semgrep/mcp)
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [Supergateway](https://github.com/supercorp-ai/supergateway)
+**Project:** [DockerfileModifier](./DockerfileModifier.sh) · [compose example](./docker-compose.yml) · [GitHub repo](https://github.com/mekayelanik/semgrep-mcp-docker)
 
-### Docker Resources
-
-- [Dockerfile Modifier](./DockerfileModifier.sh)
-- [Compose Example](./docker-compose.yml)
-- [GitHub Repository](https://github.com/mekayelanik/semgrep-mcp-docker)
-
-### Monitoring
-
-Health endpoint returns HTTP 200 with supergateway status. Wire into your monitoring (Prometheus blackbox, Uptime Kuma, etc.) at `http[s]://host:7055/healthz`.
+**Monitoring:** `/healthz` returns 200 with supergateway status — wire into Prometheus blackbox, Uptime Kuma, etc.
 
 ## 😎 Buy Me a Coffee ☕︎
 
-If this image saved you time, [buy me a coffee](https://buymeacoffee.com/mekayelanik).
+Image saved you time? [Buy me a coffee](https://buymeacoffee.com/mekayelanik).
 
 ## Support & License
 
@@ -529,17 +567,13 @@ PRs welcome. Keep changes minimal, match existing code style, preserve universal
 
 ### License & Attribution
 
-This Docker packaging is licensed **MIT** — see [LICENSE](./LICENSE).
-
-The software packaged inside the image retains its original licensing:
-- **Semgrep CLI** — LGPL-2.1 (see [github.com/semgrep/semgrep/blob/develop/LICENSE](https://github.com/semgrep/semgrep/blob/develop/LICENSE))
-- **Semgrep Registry rules** (fetched at runtime, not bundled) — governed by Semgrep's Terms of Service, see [semgrep.dev/legal](https://semgrep.dev/legal/)
-- **Semgrep Pro Engine** (requires your own `SEMGREP_APP_TOKEN`, not bundled) — proprietary, see [semgrep.dev/legal](https://semgrep.dev/legal/)
-- **supergateway** — MIT (see [github.com/supercorp-ai/supergateway](https://github.com/supercorp-ai/supergateway))
-- **HAProxy** — GPL-2.0-or-later (see [haproxy.org](https://www.haproxy.org/))
+Docker packaging: **MIT** — see [LICENSE](./LICENSE). Packaged software retains its original licensing:
+- **Semgrep CLI** — LGPL-2.1 ([license](https://github.com/semgrep/semgrep/blob/develop/LICENSE))
+- **Semgrep Registry rules** (fetched at runtime, not bundled) — Semgrep ToS, [semgrep.dev/legal](https://semgrep.dev/legal/)
+- **Semgrep Pro Engine** (requires your own token, not bundled) — proprietary, [semgrep.dev/legal](https://semgrep.dev/legal/)
+- **supergateway** — MIT ([repo](https://github.com/supercorp-ai/supergateway))
+- **HAProxy** — GPL-2.0-or-later ([haproxy.org](https://www.haproxy.org/))
 
 ### Trademark Notice
 
-**Semgrep®** is a registered trademark of Semgrep Inc. This project is an **unofficial community packaging** and is not affiliated with, sponsored by, or endorsed by Semgrep Inc. The Semgrep name and logo are used only nominatively to identify the software packaged inside this image.
-
-For official Semgrep products and support, visit [semgrep.dev](https://semgrep.dev).
+**Semgrep®** is a registered trademark of Semgrep Inc. Unofficial community packaging, not affiliated with or endorsed by Semgrep Inc. Name/logo used nominatively to identify packaged software. Official Semgrep: [semgrep.dev](https://semgrep.dev).

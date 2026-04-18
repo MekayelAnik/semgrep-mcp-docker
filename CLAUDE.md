@@ -38,7 +38,13 @@ Healthcheck `start-period=240s` to absorb Pro install on first boot.
 
 ## Universal posture
 
-No thesis/clinical/domain-specific rules baked in. Default `SEMGREP_RULES=p/default`. Users mount own rules via `/opt/custom-rules:ro`. Works OSS day-1.
+No thesis/clinical/domain-specific rules baked in. Default `SEMGREP_RULES=p/default` (exported in `start_mcp_server()`; offline-safe, no project-URL leak to `auto`). Users override with space-separated list to stack multiple registry packs + local files:
+
+```
+SEMGREP_RULES="p/default p/python p/owasp-top-ten /opt/custom-rules/local.yaml"
+```
+
+Wired via upstream `cli/src/semgrep/commands/scan.py:632` (Click `-f/--config` with `envvar=SEMGREP_RULES`, `multiple=True`). Consumed by `semgrep_scan` / `semgrep_scan_remote` subprocess. Ignored by `semgrep_scan_with_custom_rule` (rule-string wins) and `semgrep_scan_supply_chain` (hardcoded). Users mount own rules via `/opt/custom-rules:ro`. Works OSS day-1.
 
 ## Upstream CLI contract (do not drift)
 
