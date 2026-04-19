@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://hub.docker.com/r/mekayelanik/semgrep-mcp-server"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/mekayelanik/semgrep-mcp-server?style=flat-square&logo=docker"></a>
   <a href="https://hub.docker.com/r/mekayelanik/semgrep-mcp-server"><img alt="Platforms" src="https://img.shields.io/badge/Platforms-amd64%20%7C%20arm64-lightgrey?style=flat-square"></a>
-  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/blob/main/LICENSE"><img alt="License: GPL v3" src="https://img.shields.io/badge/License-GPLv3-blue?style=flat-square"></a>
   <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
   <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/issues"><img alt="Issues" src="https://img.shields.io/github/issues/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
   <a href="https://github.com/MekayelAnik/semgrep-mcp-docker/commits/main"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/MekayelAnik/semgrep-mcp-docker?style=flat-square"></a>
@@ -566,7 +566,7 @@ PRs welcome. Keep changes minimal, match existing code style, preserve universal
 
 ### License & Attribution
 
-Docker packaging: **MIT** — see [LICENSE](./LICENSE). Packaged software retains its original licensing:
+Docker packaging: **GPL-3.0-or-later** — see [LICENSE](./LICENSE). Packaged software retains its original licensing:
 - **Semgrep CLI** — LGPL-2.1 ([license](https://github.com/semgrep/semgrep/blob/develop/LICENSE))
 - **Semgrep Registry rules** (fetched at runtime, not bundled) — Semgrep ToS, [semgrep.dev/legal](https://semgrep.dev/legal/)
 - **Semgrep Pro Engine** (requires your own token, not bundled) — proprietary, [semgrep.dev/legal](https://semgrep.dev/legal/)
