@@ -77,6 +77,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \\
     apk del .build-deps && \\
     echo "Package installed successfully"
 
+# Apply build-time patches to upstream semgrep (anchor-checked; build fails if
+# upstream moved, forcing a review on every version bump).
+# Current patches:
+#   fix_mcp_multirule.py — osemgrep's SEMGREP_RULES envvar doesn't split
+#       whitespace-separated multi-value configs (pysemgrep's Click does).
+#       Patch rewrites cli/src/semgrep/mcp/server.py::get_semgrep_scan_args to
+#       pre-split SEMGREP_RULES and inject N \`--config X\` args. Retire when
+#       upstream fixes the osemgrep path.
+COPY ./build_data/patches/ /tmp/patches/
+RUN python3 /tmp/patches/fix_mcp_multirule.py && rm -rf /tmp/patches
+
 # Install Supergateway (cache mount shares npm cache with previous step)
 RUN --mount=type=cache,target=/root/.npm \\
     echo "Installing Supergateway..." && \\
