@@ -407,6 +407,8 @@ SEMGREP_RULES="p/default p/ai-best-practices p/shadow-ai p/agent-skills p/mcp p/
 - `semgrep_scan_supply_chain` — hardcoded `--config supply-chain`; `SEMGREP_RULES` ignored.
 - Unset → default `p/default`. `auto` → cloud fetch (leaks project URL).
 
+> **Multi-value note:** upstream osemgrep does not split `SEMGREP_RULES` on whitespace; this image bakes a build-time patch (`build_data/patches/fix_mcp_multirule.py`, anchor-checked) so multi-value works transparently for all MCP tools.
+
 ## Code & Rules Directories
 
 Scan target + custom-rules dirs are env-configurable via `.env` or shell env. Compose auto-loads `.env` next to `docker-compose.yml`.
