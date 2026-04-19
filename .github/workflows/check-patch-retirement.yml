@@ -1,0 +1,162 @@
+name: Check Patch Retirement
+
+# Weekly probe: is the upstream bug that our build-time patch works around
+# still present? If not → open a retirement issue so a maintainer can drop
+# the patch.
+#
+# The patch lives at build_data/patches/fix_mcp_multirule.py. It patches
+# `semgrep/mcp/server.py::get_semgrep_scan_args` to pre-split SEMGREP_RULES
+# on whitespace and emit N `--config X` args. Upstream osemgrep's Cmdliner
+# does not currently split the envvar, so multi-value SEMGREP_RULES breaks
+# the `semgrep_scan` MCP tool without the patch.
+#
+# This probe installs vanilla `semgrep` from PyPI (no patch applied), calls
+# `get_semgrep_scan_args("/tmp", None)` with a multi-value SEMGREP_RULES env,
+# and inspects the returned arg list.
+#   ≥2 `--config` entries  ⇒ upstream fixed the osemgrep envvar split
+#                          ⇒ OR upstream split it in Python themselves
+#                          ⇒ either way, our patch is redundant — retire.
+#   exactly 0 or 1 `--config` entries ⇒ bug still present ⇒ keep patch.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-patch-retirement
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Vanilla semgrep multi-value SEMGREP_RULES probe
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout (for retirement issue template only)
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install vanilla semgrep from PyPI (no patch)
+        id: install
+        run: |
+          python -m venv /tmp/probe-venv
+          /tmp/probe-venv/bin/pip install --upgrade pip >/dev/null
+          /tmp/probe-venv/bin/pip install --no-cache-dir "semgrep" 2>&1 | tail -3
+          SEMGREP_VERSION="$(/tmp/probe-venv/bin/semgrep --version 2>&1 | head -1)"
+          echo "semgrep_version=${SEMGREP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Installed vanilla semgrep: ${SEMGREP_VERSION}"
+
+      - name: Run retirement probe
+        id: probe
+        run: |
+          OUT="$(
+            SEMGREP_RULES="p/default p/python p/fastapi" \
+            /tmp/probe-venv/bin/python -c "
+          from semgrep.mcp.server import get_semgrep_scan_args
+          args = get_semgrep_scan_args('/tmp', None)
+          print(repr(args))
+          "
+          )"
+          echo "args_repr=${OUT}" >> "$GITHUB_OUTPUT"
+
+          # Count --config entries; ≥2 means upstream split multi-value env.
+          CFG_COUNT="$(
+            SEMGREP_RULES="p/default p/python p/fastapi" \
+            /tmp/probe-venv/bin/python -c "
+          from semgrep.mcp.server import get_semgrep_scan_args
+          args = get_semgrep_scan_args('/tmp', None)
+          print(sum(1 for a in args if a == '--config'))
+          "
+          )"
+          echo "config_count=${CFG_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "Vanilla args repr: ${OUT}"
+          echo "--config entries detected: ${CFG_COUNT}"
+          if [ "${CFG_COUNT}" -ge 2 ]; then
+            echo "retire=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "retire=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if retirement issue already exists
+        if: steps.probe.outputs.retire == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Look for an open issue we have filed before so we don't spam
+          MATCH="$(
+            gh issue list --state open --search 'in:title "retire fix_mcp_multirule.py"' \
+              --json number,title --jq '.[0].number // empty'
+          )"
+          if [ -n "${MATCH}" ]; then
+            echo "already_open=${MATCH}" >> "$GITHUB_OUTPUT"
+            echo "Retirement issue #${MATCH} already open — skipping"
+          else
+            echo "already_open=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open retirement issue
+        if: steps.probe.outputs.retire == 'true' && steps.existing.outputs.already_open == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VANILLA_ARGS: ${{ steps.probe.outputs.args_repr }}
+          SEMGREP_VERSION: ${{ steps.install.outputs.semgrep_version }}
+          CFG_COUNT: ${{ steps.probe.outputs.config_count }}
+        run: |
+          gh issue create \
+            --title 'retire fix_mcp_multirule.py — upstream appears to split SEMGREP_RULES correctly' \
+            --body "$(cat <<EOF
+          The weekly patch-retirement probe detected that vanilla semgrep (no patch applied) now returns a correctly-split arg list when \`SEMGREP_RULES\` is multi-value. Our build-time patch \`build_data/patches/fix_mcp_multirule.py\` is likely redundant.
+
+          ## Probe output
+
+          - Vanilla semgrep version: \`${SEMGREP_VERSION}\`
+          - \`SEMGREP_RULES\`: \`p/default p/python p/fastapi\`
+          - \`get_semgrep_scan_args('/tmp', None)\` result:
+
+          \`\`\`
+          ${VANILLA_ARGS}
+          \`\`\`
+
+          - \`--config\` entries detected: **${CFG_COUNT}** (threshold: ≥2 ⇒ retire)
+
+          ## Manual verification before removing the patch
+
+          1. Check the upstream issue at https://github.com/semgrep/semgrep/issues/11644 and any linked commits — confirm the fix really addresses multi-value \`SEMGREP_RULES\` on the osemgrep path (\`semgrep scan --experimental\`).
+          2. Build the image WITHOUT applying the patch (comment out the \`python3 /tmp/patches/fix_mcp_multirule.py\` line in the Dockerfile, or drop the patch file) and rerun the smoke test:
+             - container env \`SEMGREP_RULES="p/default p/python p/fastapi p/javascript"\`
+             - MCP tool \`semgrep_scan\` call via \`/tmp/mcp_sdk_test.py\` (or equivalent MCP SDK client)
+             - expect all packs loaded + no \`Failed to download config\` 404
+          3. If smoke passes, delete:
+             - \`build_data/patches/fix_mcp_multirule.py\`
+             - The \`COPY ./build_data/patches/ /tmp/patches/\` + \`RUN python3 /tmp/patches/fix_mcp_multirule.py\` block in \`DockerfileModifier.sh\`
+             - The \`Active upstream patches\` row in \`CLAUDE.md\`
+             - The multi-value note in README (\`### Precedence\` subsection)
+          4. Update auto-memory \`project_semgrep_mcp.md\` — mark the patch retired.
+
+          ## Keep-safe option
+
+          If in doubt, leaving the patch in place is safe. Our patched args path emits explicit \`--config X\` flags which take precedence over envvar fallback regardless of whether upstream now splits correctly. Overhead per call is microseconds.
+
+          ---
+          *Filed automatically by \`.github/workflows/check-patch-retirement.yml\`.*
+          EOF
+          )" \
+            --label 'patch-retirement'
+
+      - name: Log no-retire decision
+        if: steps.probe.outputs.retire != 'true'
+        run: |
+          echo "Patch still needed. Vanilla args: ${{ steps.probe.outputs.args_repr }}"
+          echo "No retirement issue opened."

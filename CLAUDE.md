@@ -73,6 +73,28 @@ Build arg contract: `BASE_IMAGE`, `SEMGREP_MCP_VERSION`.
 - FastMCP has built-in JWT auth via Semgrep API (OAuth routes at `/.well-known/oauth-*`). Our HAProxy Bearer gate stacks on top.
 - Port 7055 external + 37055 loopback. Renovate won't bump these — hard-coded.
 
+## Active upstream patches
+
+Build-time Python patches applied to installed `semgrep` package, stored under `build_data/patches/`. Each one is **anchor-checked** — the build aborts loudly if the upstream function body drifts, forcing human review on every semgrep version bump.
+
+| Patch file | Target | Upstream issue | Retire when |
+|------------|--------|----------------|-------------|
+| `fix_mcp_multirule.py` | `semgrep/mcp/server.py::get_semgrep_scan_args` | [#11644](https://github.com/semgrep/semgrep/issues/11644) (osemgrep Cmdliner SEMGREP_RULES envvar doesn't split whitespace — note: issue title mentions `--x-mcp` but real root cause is osemgrep envvar handling; correction pending) | vanilla `semgrep_scan` MCP tool accepts multi-value `SEMGREP_RULES` without the patch |
+
+### Retirement probe
+
+CI workflow `.github/workflows/check-patch-retirement.yml` runs weekly (+ manual dispatch). It:
+1. Installs latest `semgrep` from PyPI into a clean venv (no image build, no patch applied).
+2. Exercises vanilla `get_semgrep_scan_args("/tmp", None)` with `SEMGREP_RULES="p/default p/python"` env.
+3. Inspects returned args: ≥2 `--config` entries ⇒ upstream fixed ⇒ opens a retirement issue on this repo.
+
+### Renovate PR checklist
+
+On each semgrep version-bump PR opened by Renovate:
+- [ ] Anchor check still passes (build green) — if red, update anchor or retire
+- [ ] Read release notes / CHANGELOG for any osemgrep envvar-handling change
+- [ ] Run the retirement probe locally if unsure: `python3 -c "from semgrep.mcp.server import get_semgrep_scan_args; import os; os.environ['SEMGREP_RULES']='p/a p/b'; print(get_semgrep_scan_args('/tmp', None))"` (inside a venv with vanilla semgrep, NOT the patched image)
+
 ## Version pin
 
 `build_data/version` = `1.159.0` (latest as of 2026-04-18). Renovate auto-bumps via custom.regex manager in `renovate.json`.
