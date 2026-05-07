@@ -75,11 +75,31 @@ Build arg contract: `BASE_IMAGE`, `SEMGREP_MCP_VERSION`.
 
 ## Active upstream patches
 
-Build-time Python patches applied to installed `semgrep` package, stored under `build_data/patches/`. Each one is **anchor-checked** — the build aborts loudly if the upstream function body drifts, forcing human review on every semgrep version bump.
+Build-time Python patches applied to installed `semgrep` package, stored under `build_data/patches/`. Each one is **anchor-checked** with **soft-failure semantics** — the build never aborts because of a patch; instead the patch logs a loud stderr warning and exits 0, so a future upstream restructure or fix never breaks CI.
+
+Anchor strategy: small, stable block inside the target function (not byte-identical full-function match). Tolerates unrelated additions to the same function. Idempotency uses a unique in-replacement marker string.
+
+Soft-failure decision tree (per patch):
+
+| Scenario | Action | Exit |
+|---|---|---|
+| Already patched (marker present) | log + skip | 0 |
+| Upstream module missing | log + skip | 0 |
+| Auto-retired (target function now references the env var the patch was working around) | log "OBSOLETE — delete this patch" + skip | 0 |
+| Anchor drifted, underlying bug still live | LOUD stderr WARNING, build proceeds **unpatched** | 0 |
+| Anchor matched >1 times (ambiguous) | stderr warning + skip | 0 |
+| Anchor matched once | apply | 0 |
+| File-system I/O error | abort | 1 |
+
+The retirement probe in `.github/workflows/check-patch-retirement.yml` is the canonical signal that a patch can be deleted from this repo.
 
 | Patch file | Target | Upstream issue | Retire when |
 |------------|--------|----------------|-------------|
-| `fix_mcp_multirule.py` | `semgrep/mcp/server.py::get_semgrep_scan_args` | [#11644](https://github.com/semgrep/semgrep/issues/11644) (osemgrep Cmdliner SEMGREP_RULES envvar doesn't split whitespace — note: issue title mentions `--x-mcp` but real root cause is osemgrep envvar handling; correction pending) | vanilla `semgrep_scan` MCP tool accepts multi-value `SEMGREP_RULES` without the patch |
+| `fix_mcp_multirule.py` | `semgrep/mcp/server.py::get_semgrep_scan_args` | [#11644](https://github.com/semgrep/semgrep/issues/11644) (osemgrep Cmdliner `SEMGREP_RULES` envvar doesn't split whitespace — issue title mentions `--x-mcp` but real root cause is osemgrep envvar handling; correction pending). Independent of [#11649](https://github.com/semgrep/semgrep/issues/11649) (auto-config + metrics-off), which upstream fixed in 1.162.0 by raising a clearer `McpError` from inside `get_semgrep_scan_args`. | vanilla `semgrep_scan` MCP tool accepts multi-value `SEMGREP_RULES` without the patch |
+
+### Patch / upstream-1.162.0 metrics-check interaction
+
+The 1.162.0 metrics-off block lives inside `get_semgrep_scan_args` and raises when `config is None or config == "auto"` with metrics disabled. Our patched else-branch injects `--config` args from `SEMGREP_RULES` but the `config` parameter remains `None`, so the metrics check would still fire. The patch therefore rebinds `config = "<patched-from-env>"` after env injection so the downstream check sees a non-None, non-`"auto"` value and skips the raise. If `SEMGREP_RULES` is unset, `config` stays `None` and the upstream metrics-off `McpError` fires as designed (correct UX — user gets actionable error, not opaque exit-2).
 
 ### Retirement probe
 
@@ -97,4 +117,4 @@ On each semgrep version-bump PR opened by Renovate:
 
 ## Version pin
 
-`build_data/version` = `1.159.0` (latest as of 2026-04-18). Renovate auto-bumps via custom.regex manager in `renovate.json`.
+`build_data/version` = `1.159.0` (latest as of 2026-04-18). Renovate auto-bumps via custom.regex manager in `renovate.json`. Build matrix exercises 1.153.1 → 1.162.0 (current latest); patch must hold across the whole window.
