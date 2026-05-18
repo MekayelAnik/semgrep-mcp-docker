@@ -1,6 +1,9 @@
 #!/bin/sh
-# Smart healthcheck: probes supergateway /healthz via HAProxy frontend.
-# During first-run bootstrap (TLS gen / login), HAProxy may not be up yet —
+# Smart healthcheck: probes /healthz via HAProxy frontend.
+# /healthz is answered locally by HAProxy (mcp-proxy lacks a configurable
+# health endpoint) so this returns 200 as soon as HAProxy is up, regardless
+# of upstream mcp-proxy/semgrep readiness.
+# During first-run bootstrap (TLS gen), HAProxy may not be up yet —
 # reports healthy so the container doesn't bounce during startup.
 set -eu
 

@@ -9,15 +9,33 @@ services:
     environment:
       # --- Container config ---
       PORT: 7055                    # External HAProxy port
-      INTERNAL_PORT: 37055          # Internal supergateway port (loopback)
+      INTERNAL_PORT: 37055          # Internal mcp-proxy port (loopback)
       PUID: 1000
       PGID: 1000
       TZ: UTC
 
       # --- Transport ---
-      PROTOCOL: SHTTP               # SHTTP | SSE | WS
-      ENABLE_HTTPS: "false"         # Flip to "true" for TLS (auto-generates self-signed cert)
+      # mcp-proxy exposes /mcp (StreamableHTTP) AND /sse simultaneously.
+      # PROTOCOL is kept for compatibility; SHTTP and SSE are equivalent here.
+      PROTOCOL: SHTTP               # SHTTP | SSE (WS dropped — unsupported by mcp-proxy)
+      # ENABLE_HTTPS=false is plaintext over the wire. Safe ONLY for loopback /
+      # trusted internal networks. Set to "true" for any public, multi-host, or
+      # untrusted deployment — HAProxy auto-generates a self-signed cert if none
+      # is mounted under /etc/haproxy/certs/.
+      ENABLE_HTTPS: "false"
       HTTP_VERSION_MODE: auto       # auto | h1 | h2 | h3 | h1+h2 | all
+
+      # --- mcp-proxy session model ---
+      # Stateful by default — REQUIRED for semgrep: upstream issues server-initiated
+      # `roots/list` reverse-RPC on most tool calls. Stateless mode would respawn
+      # the child per POST and break every reverse-RPC. Do not change unless you
+      # know what you're doing.
+      MCP_PROXY_STATELESS: "false"
+      # Cap virtual memory of the semgrep stdio child (MiB; 0 disables)
+      SEMGREP_MAX_MEM_MB: 4096
+      # HAProxy concurrency caps (0 disables)
+      HAPROXY_FRONTEND_MAXCONN: 64
+      HAPROXY_SERVER_MAXCONN: 16
 
       # --- Auth (HAProxy Bearer gate) ---
       # API_KEY: "your-long-random-token"   # Uncomment to require Bearer auth

@@ -546,6 +546,21 @@ generate_haproxy_config() {
     escaped_bind_params="$(escape_sed_replacement "$BIND_PARAMS")"
     escaped_quic_bind_line="$(escape_sed_replacement "$QUIC_BIND_LINE")"
 
+    # Concurrency caps. Bound HAProxy-level acceptance so a burst cannot
+    # saturate the upstream stdio bridge. Empty = no cap.
+    local frontend_maxconn_clause=""
+    local server_maxconn_clause=""
+    if [[ "${HAPROXY_FRONTEND_MAXCONN:-0}" =~ ^[1-9][0-9]*$ ]]; then
+        frontend_maxconn_clause="maxconn ${HAPROXY_FRONTEND_MAXCONN}"
+    fi
+    if [[ "${HAPROXY_SERVER_MAXCONN:-0}" =~ ^[1-9][0-9]*$ ]]; then
+        server_maxconn_clause="maxconn ${HAPROXY_SERVER_MAXCONN}"
+    fi
+    local escaped_frontend_maxconn
+    local escaped_server_maxconn
+    escaped_frontend_maxconn="$(escape_sed_replacement "$frontend_maxconn_clause")"
+    escaped_server_maxconn="$(escape_sed_replacement "$server_maxconn_clause")"
+
     sed -e "s|__SERVER_PORT__|${PORT}|g" \
         -e "s|__BIND_PARAMS__|${escaped_bind_params}|g" \
         -e "s|__QUIC_BIND_LINE__|${escaped_quic_bind_line}|g" \
@@ -553,6 +568,8 @@ generate_haproxy_config() {
         -e "s|__SERVER_NAME__|${HAPROXY_SERVER_NAME}|g" \
         -e "s|__CORS_PREFLIGHT_CONDITION__|${cors_preflight_condition}|g" \
         -e "s|__CORS_RESPONSE_CONDITION__|${cors_response_condition}|g" \
+        -e "s|__FRONTEND_MAXCONN__|${escaped_frontend_maxconn}|g" \
+        -e "s|__SERVER_MAXCONN__|${escaped_server_maxconn}|g" \
         "$HAPROXY_TEMPLATE" > "${HAPROXY_CONFIG}.tmp"
 
     awk -v replacement="$api_key_check" -v replacement_cors="$cors_check" \
@@ -720,56 +737,93 @@ start_mcp_server() {
     # Consumed by semgrep_scan / semgrep_scan_remote subprocess; overridden by explicit --config
     # in semgrep_scan_with_custom_rule and semgrep_scan_supply_chain.
     export SEMGREP_RULES="${SEMGREP_RULES:-p/default}"
-    # HARD LOCK: supergateway must always talk to `semgrep mcp` over stdio.
-    # Client-facing transport (SHTTP/SSE/WS/stdio) is a supergateway-level choice
-    # controlled by $PROTOCOL — supergateway bridges it to an stdio child. If the
+    # HARD LOCK: mcp-proxy must always talk to `semgrep mcp` over stdio.
+    # Client-facing transport (SHTTP/SSE) is exposed by mcp-proxy simultaneously
+    # on /mcp + /sse — there is no per-protocol switch at the bridge layer. If the
     # user sets MCP_TRANSPORT=streamable-http expecting to change the upstream
     # link, it would conflict with how this image is packaged. We force stdio here
     # and warn if overridden. CLI flag `-t stdio` also beats envvar but belt-and-
     # suspenders is cheap and makes the contract explicit.
     if [[ -n "${MCP_TRANSPORT:-}" && "${MCP_TRANSPORT}" != "stdio" ]]; then
-        echo "WARNING: MCP_TRANSPORT='${MCP_TRANSPORT}' ignored — supergateway→semgrep link is always stdio in this image. Client transport is controlled by PROTOCOL env (SHTTP/SSE/WS)." >&2
+        echo "WARNING: MCP_TRANSPORT='${MCP_TRANSPORT}' ignored — mcp-proxy→semgrep link is always stdio in this image. Client transport is controlled by PROTOCOL env (SHTTP/SSE)." >&2
     fi
     export MCP_TRANSPORT="stdio"
-    # Line-buffer python so supergateway sees stdio events immediately
+    # Line-buffer python so mcp-proxy sees stdio events immediately
     export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 
-    # Upstream `semgrep mcp` accepts only: -t/--transport, -p/--port, -k/--hook, -a/--agent
-    local mcp_server_cmd="semgrep mcp -t stdio"
+    # mcp-proxy session model: stateful by default (REQUIRED for semgrep —
+    # upstream `semgrep mcp` issues server-initiated `roots/list` reverse-RPC
+    # on most tool calls; stateless mode would respawn the child per POST and
+    # break every reverse-RPC). Flip to stateless ONLY for short non-reverse-
+    # RPC use cases (most semgrep tools will hang).
+    MCP_PROXY_STATELESS="${MCP_PROXY_STATELESS:-false}"
+    # Cap virtual memory of the semgrep stdio child (MiB; 0 disables).
+    SEMGREP_MAX_MEM_MB="${SEMGREP_MAX_MEM_MB:-0}"
 
-    # Session timeout: 1 h default. Keeps stateful SHTTP sessions alive across
-    # long scans + idle gaps in interactive clients. Override with SESSION_TIMEOUT_MS.
-    local session_timeout_ms="${SESSION_TIMEOUT_MS:-3600000}"
+    # Upstream `semgrep mcp` accepts only: -t/--transport, -p/--port, -k/--hook, -a/--agent
+    local semgrep_argv=(semgrep mcp -t stdio)
+
+    # mcp-proxy receives the stdio command as positional args after `--`,
+    # so prlimit can prefix the argv list directly.
+    if [[ "${SEMGREP_MAX_MEM_MB}" =~ ^[1-9][0-9]*$ ]] && command -v prlimit >/dev/null 2>&1; then
+        local mem_bytes=$((SEMGREP_MAX_MEM_MB * 1024 * 1024))
+        semgrep_argv=(prlimit "--as=${mem_bytes}" -- "${semgrep_argv[@]}")
+        echo "Semgrep child memory cap: ${SEMGREP_MAX_MEM_MB} MiB (prlimit --as)"
+    fi
+
+    # Build mcp-proxy CORS args. CORS env may be comma-separated origins or "*".
+    local cors_args=()
+    if [[ -n "${CORS:-}" ]]; then
+        local origin
+        for origin in ${CORS//,/ }; do
+            cors_args+=(--allow-origin "$origin")
+        done
+    fi
+    cors_args+=(--expose-header Mcp-Session-Id)
+
+    local stateless_args=()
+    if [[ "${MCP_PROXY_STATELESS,,}" == "true" ]]; then
+        stateless_args+=(--stateless)
+    else
+        stateless_args+=(--no-stateless)
+    fi
+
+    local mode_tag="stateful"
+    [[ "${MCP_PROXY_STATELESS,,}" == "true" ]] && mode_tag="stateless"
 
     case "${PROTOCOL^^}" in
-        SHTTP|STREAMABLEHTTP)
-            # --stateful is REQUIRED for semgrep: upstream `semgrep mcp` issues
-            # server-initiated `roots/list` reverse-RPC on most tool calls
-            # (get_supported_languages, semgrep_rule_schema, semgrep_scan,
-            # get_abstract_syntax_tree, etc). Stateless mode respawns the child
-            # per POST so the child can never receive the client's roots
-            # response — every such tool call hangs. Stateful mode keeps
-            # one persistent child + correlates server→client requests to
-            # the right SSE stream. See supergateway --help.
-            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stateful --sessionTimeout "$session_timeout_ms" --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SHTTP/streamableHttp (stateful, sessionTimeout=${session_timeout_ms}ms)"
-            ;;
-        SSE)
-            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --ssePath /sse --outputTransport sse --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SSE/Server-Sent Events"
+        SHTTP|STREAMABLEHTTP|SSE)
+            # mcp-proxy exposes both /mcp (StreamableHTTP) and /sse simultaneously.
+            CMD_ARGS=(mcp-proxy
+                --host 127.0.0.1
+                --port "$INTERNAL_PORT"
+                --pass-environment
+                "${stateless_args[@]}"
+                "${cors_args[@]}"
+                --
+                "${semgrep_argv[@]}")
+            PROTOCOL_DISPLAY="mcp-proxy: /mcp (StreamableHTTP) + /sse (${mode_tag})"
             ;;
         WS|WEBSOCKET)
-            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --messagePath /message --outputTransport ws --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="WS/WebSocket"
+            echo "ERROR: WebSocket transport is not supported by mcp-proxy." >&2
+            echo "       Use PROTOCOL=SHTTP or PROTOCOL=SSE instead." >&2
+            exit 1
             ;;
         *)
             echo "Invalid PROTOCOL='${PROTOCOL}', using default ${DEFAULT_PROTOCOL}"
-            CMD_ARGS=(supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stateful --sessionTimeout "$session_timeout_ms" --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SHTTP/streamableHttp (stateful, sessionTimeout=${session_timeout_ms}ms)"
+            CMD_ARGS=(mcp-proxy
+                --host 127.0.0.1
+                --port "$INTERNAL_PORT"
+                --pass-environment
+                "${stateless_args[@]}"
+                "${cors_args[@]}"
+                --
+                "${semgrep_argv[@]}")
+            PROTOCOL_DISPLAY="mcp-proxy: /mcp (StreamableHTTP) + /sse (${mode_tag})"
             ;;
     esac
 
-    echo "Launching Semgrep MCP (${mcp_server_cmd}) wrapped by supergateway (${PROTOCOL_DISPLAY})"
+    echo "Launching Semgrep MCP (semgrep mcp -t stdio) wrapped by mcp-proxy (${PROTOCOL_DISPLAY})"
 
     if [ "$(id -u)" -eq 0 ] && id -u semgrep >/dev/null 2>&1; then
         su-exec semgrep "${CMD_ARGS[@]}" &

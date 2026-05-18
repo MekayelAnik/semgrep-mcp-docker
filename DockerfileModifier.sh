@@ -6,7 +6,11 @@ BASE_IMAGE=$(cat ./build_data/base-image 2>/dev/null || echo "python:3.13-alpine
 HAPROXY_IMAGE=$(cat ./build_data/haproxy-image 2>/dev/null || echo "haproxy:lts-alpine")
 SEMGREP_MCP_VERSION=$(cat ./build_data/version 2>/dev/null || exit 1)
 SEMGREP_PKG="semgrep==${SEMGREP_MCP_VERSION}"
-SUPERGATEWAY_PKG='supergateway@latest'
+# mcp-proxy: stdio<->StreamableHTTP/SSE bridge. Replaces supergateway.
+# Stateful by default (one stdio child shared across all sessions, multiplexed
+# by JSON-RPC ids) — avoids the spawn-per-request memory leak that affected
+# supergateway in stateless mode (supercorp-ai/supergateway#108).
+MCP_PROXY_PKG=$(cat ./build_data/mcp_proxy_version 2>/dev/null || echo "mcp-proxy")
 DOCKERFILE_NAME="Dockerfile.$REPO_NAME"
 
 # Create a temporary file safely
@@ -35,7 +39,7 @@ FROM $BASE_IMAGE AS build
 # Author info:
 LABEL org.opencontainers.image.authors="MOHAMMAD MEKAYEL ANIK <mekayel.anik@gmail.com>"
 LABEL org.opencontainers.image.source="https://github.com/mekayelanik/semgrep-mcp-docker"
-LABEL org.opencontainers.image.description="Semgrep MCP server (official \`semgrep mcp\`) wrapped with supergateway stdio\u2192streamableHttp/SSE/WS bridge, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limiting, IP ACL, Bearer-token API key auth."
+LABEL org.opencontainers.image.description="Semgrep MCP server (official \`semgrep mcp\`) wrapped with mcp-proxy stdio\u2192StreamableHTTP/SSE bridge, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limiting, IP ACL, Bearer-token API key auth."
 LABEL org.opencontainers.image.documentation="https://github.com/mekayelanik/semgrep-mcp-docker/blob/main/README.md"
 LABEL org.opencontainers.image.licenses="MIT"
 
@@ -55,13 +59,14 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/banner.sh /usr/local/bi
 # Runtime: bash (scripts), shadow (usermod), su-exec (drop root), tzdata,
 #          haproxy (replaced by QUIC build below), netcat-openbsd (healthcheck),
 #          openssl (TLS self-signed), ca-certificates (rule registry HTTPS),
-#          nodejs+npm (supergateway), git (semgrep registry fetch)
+#          git (semgrep registry fetch), util-linux (prlimit for memory caps)
 # Build:   build-base + libffi-dev (compile semgrep native extensions on ARM)
+# Note: nodejs/npm removed — mcp-proxy is pure Python, no Node runtime needed.
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories && \\
     echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \\
     apk --update-cache --no-cache add \\
         bash shadow su-exec tzdata haproxy netcat-openbsd openssl ca-certificates \\
-        nodejs npm git && \\
+        git util-linux && \\
     apk --update-cache --no-cache add --virtual .build-deps build-base libffi-dev && \\
     rm -rf /var/cache/apk/*
 
@@ -69,13 +74,15 @@ RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositori
 COPY --from=haproxy-src /usr/local/sbin/haproxy /usr/sbin/haproxy
 RUN mkdir -p /usr/local/sbin && ln -sf /usr/sbin/haproxy /usr/local/sbin/haproxy
 
-# Install semgrep from PyPI (cache mount reuses pip downloads across builds)
+# Install semgrep + mcp-proxy from PyPI in one layer (shared pip cache).
+# mcp-proxy replaces supergateway as the stdio<->HTTP bridge (pure Python, no Node).
 RUN --mount=type=cache,target=/root/.cache/pip \\
-    echo "Installing package: ${SEMGREP_PKG}" && \\
-    pip install --no-cache-dir "${SEMGREP_PKG}" && \\
+    echo "Installing packages: ${SEMGREP_PKG} + ${MCP_PROXY_PKG}" && \\
+    pip install --no-cache-dir "${SEMGREP_PKG}" ${MCP_PROXY_PKG} && \\
     semgrep --version && \\
+    mcp-proxy --version || true && \\
     apk del .build-deps && \\
-    echo "Package installed successfully"
+    echo "Packages installed successfully"
 
 # Apply build-time patches to upstream semgrep (anchor-checked; build fails if
 # upstream moved, forcing a review on every version bump).
@@ -87,13 +94,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \\
 #       upstream fixes the osemgrep path.
 COPY ./build_data/patches/ /tmp/patches/
 RUN python3 /tmp/patches/fix_mcp_multirule.py && rm -rf /tmp/patches
-
-# Install Supergateway (cache mount shares npm cache with previous step)
-RUN --mount=type=cache,target=/root/.npm \\
-    echo "Installing Supergateway..." && \\
-    npm install -g ${SUPERGATEWAY_PKG} --omit=dev --no-audit --no-fund --loglevel error && \\
-    rm -rf /tmp/* /var/tmp/* && \\
-    rm -rf /usr/local/lib/node_modules/npm/man /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/html
 
 # Default ports and args
 ARG PORT=7055
@@ -115,10 +115,11 @@ ENV PORT=\${PORT} \\
 
 EXPOSE \${PORT}/tcp \${PORT}/udp
 
-# L7 health check via supergateway /healthz through HAProxy frontend.
-# start-period=240s absorbs Pro Engine auto-install (~376MB download,
+# L7 health check: /healthz is answered by HAProxy locally (mcp-proxy lacks a
+# configurable health endpoint) so the check itself returns in well under a
+# second. start-period=240s absorbs Pro Engine auto-install (~376MB download,
 # triggered when SEMGREP_APP_TOKEN is set and binary is missing) plus
-# supergateway + HAProxy boot. Ordinary OSS cold start completes within 30s.
+# mcp-proxy + HAProxy boot. Ordinary OSS cold start completes within 30s.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=240s --retries=3 \\
     CMD /usr/local/bin/healthcheck.sh
 

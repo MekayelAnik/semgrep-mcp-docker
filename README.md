@@ -15,7 +15,7 @@
 
 > **⚠️ Unofficial image** — community-maintained, packages the official [Semgrep CLI](https://github.com/semgrep/semgrep) (LGPL-2.1). **Not affiliated with / endorsed by Semgrep Inc.** Official: [semgrep.dev](https://semgrep.dev). Semgrep® is a trademark of Semgrep Inc.; nominative use only.
 
-Runs official `semgrep mcp` (built into Semgrep ≥ 1.146.0) wrapped with [supergateway](https://github.com/supercorp-ai/supergateway) for stdio→HTTP/SSE/WS bridging, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limit, IP ACL, Bearer auth.
+Runs official `semgrep mcp` (built into Semgrep ≥ 1.146.0) wrapped with [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) for stdio→StreamableHTTP/SSE bridging, fronted by HAProxy L7 with TLS, HTTP/2, HTTP/3 (QUIC), CORS, rate limit, IP ACL, Bearer auth.
 
 ## Table of Contents
 
@@ -53,11 +53,11 @@ Semgrep MCP exposes Semgrep's security scanner as Model Context Protocol tools a
 - **9 MCP Tools + 2 Prompts + 2 Resources** (see [Tool Reference](#tool-reference))
 - **Universal OSS + Pro** — works without a token; auto-unlocks Pro when `SEMGREP_APP_TOKEN` is set
 - **Multi-arch** — native `linux/amd64` + `linux/arm64`
-- **Multiple transports** — SHTTP (streamable HTTP), SSE, WebSocket via supergateway
+- **Multiple transports** — SHTTP (streamable HTTP) + SSE via mcp-proxy (exposed simultaneously)
 - **Secure defaults** — Alpine base, HAProxy TLS (auto self-signed), Bearer auth, CORS, rate limit, IP ACL
 - **HTTP/2 + HTTP/3 (QUIC)** — auto-negotiate or explicit version
 - **PUID/PGID** — non-root with configurable UID/GID
-- **Health checks** — `/healthz` endpoint through HAProxy
+- **Health checks** — `/healthz` answered locally by HAProxy (sub-millisecond)
 - **Persistent cache** — rule registry cached across restarts
 
 ### Tool Reference
@@ -155,9 +155,10 @@ docker run -d --name semgrep-mcp --restart unless-stopped \
 | Transport | Endpoint |
 |:----------|:---------|
 | SHTTP (streamable HTTP) | `http://host-ip:7055/mcp` |
-| SSE | `http://host-ip:7055/sse` + `/message` |
-| WebSocket | `ws://host-ip:7055/message` |
-| Health | `http://host-ip:7055/healthz` |
+| SSE | `http://host-ip:7055/sse` |
+| Health | `http://host-ip:7055/healthz` (HAProxy-local) |
+
+> WebSocket transport was dropped in the migration to `mcp-proxy`. Setting `PROTOCOL=WS` will now fail at startup with a clear message. Use `SHTTP` or `SSE` instead.
 
 ## Configuration
 
@@ -168,11 +169,15 @@ docker run -d --name semgrep-mcp --restart unless-stopped \
 | Variable | Default | Description |
 |:---------|:-------:|:------------|
 | `PORT` | `7055` | External HAProxy port |
-| `INTERNAL_PORT` | `37055` | Internal supergateway port (loopback) |
+| `INTERNAL_PORT` | `37055` | Internal mcp-proxy port (loopback) |
 | `PUID` | `1000` | User ID for file permissions |
 | `PGID` | `1000` | Group ID for file permissions |
 | `TZ` | `UTC` | Container timezone ([TZ database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)) |
-| `PROTOCOL` | `SHTTP` | Transport: `SHTTP` / `SSE` / `WS` |
+| `PROTOCOL` | `SHTTP` | Transport: `SHTTP` / `SSE` (both exposed simultaneously) |
+| `MCP_PROXY_STATELESS` | `false` | Keep `false` — semgrep requires stateful sessions for reverse-RPC |
+| `SEMGREP_MAX_MEM_MB` | `0` | Virtual memory cap on semgrep child (`0` disables) |
+| `HAPROXY_FRONTEND_MAXCONN` | _(unset)_ | Cap concurrent connections at HAProxy frontend |
+| `HAPROXY_SERVER_MAXCONN` | _(unset)_ | Cap concurrent connections to mcp-proxy backend |
 
 #### Semgrep Configuration
 
@@ -250,8 +255,9 @@ Find yours: `id $USER`
 | Transport | URL Format |
 |:----------|:-----------|
 | SHTTP | `http[s]://host:7055/mcp` |
-| SSE | `http[s]://host:7055/sse` (events), `http[s]://host:7055/message` (POST) |
-| WebSocket | `ws[s]://host:7055/message` |
+| SSE | `http[s]://host:7055/sse` |
+
+> WebSocket transport was dropped in the migration to `mcp-proxy`.
 
 ### CLI-based clients
 
@@ -520,7 +526,16 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 - Firewall blocking 7055/tcp or 7055/udp
 - TLS on but client uses `http://` — switch to `https://`
 - `API_KEY` set but client missing `Authorization: Bearer ...`
-- Wrong endpoint: SHTTP=`/mcp`, SSE=`/sse`+`/message`, WS=`/message`
+- Wrong endpoint: SHTTP=`/mcp`, SSE=`/sse`
+
+### Memory & Concurrency Tuning
+
+`mcp-proxy` runs the Semgrep backend as a single long-lived stdio child and multiplexes all client sessions through it via JSON-RPC ids. This caps the *expected* memory footprint; the knobs below cap the *worst case*:
+
+- `MCP_PROXY_STATELESS=false` (default) — share one backend child across all sessions. **Required for semgrep** because `semgrep mcp` issues server-initiated `roots/list` reverse-RPC on most tool calls. Stateless mode would respawn the child per POST and break every reverse-RPC tool.
+- `SEMGREP_MAX_MEM_MB=4096` — caps the virtual-memory size of the semgrep child via `prlimit --as`. A runaway scan gets OOM-killed by the kernel before it exhausts the host.
+- `HAPROXY_FRONTEND_MAXCONN=64` + `HAPROXY_SERVER_MAXCONN=16` — bound concurrent connections at the HAProxy layer so a burst cannot saturate the upstream stdio bridge.
+- `/healthz` is answered directly by HAProxy with a local 200 — Docker's container healthcheck no longer depends on upstream MCP readiness, so a slow Pro Engine install will not mark the container unhealthy.
 
 #### Slow First Scan
 
@@ -543,11 +558,11 @@ docker logs --tail 200 semgrep-mcp
 
 ## Additional Resources
 
-**Docs:** [Semgrep](https://semgrep.dev/docs/) · [Semgrep MCP upstream](https://github.com/semgrep/semgrep/tree/develop/cli/src/semgrep/mcp) · [MCP protocol](https://modelcontextprotocol.io/) · [supergateway](https://github.com/supercorp-ai/supergateway)
+**Docs:** [Semgrep](https://semgrep.dev/docs/) · [Semgrep MCP upstream](https://github.com/semgrep/semgrep/tree/develop/cli/src/semgrep/mcp) · [MCP protocol](https://modelcontextprotocol.io/) · [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy)
 
 **Project:** [DockerfileModifier](./DockerfileModifier.sh) · [compose example](./docker-compose.yml) · [GitHub repo](https://github.com/mekayelanik/semgrep-mcp-docker)
 
-**Monitoring:** `/healthz` returns 200 with supergateway status — wire into Prometheus blackbox, Uptime Kuma, etc.
+**Monitoring:** `/healthz` returns 200 (answered locally by HAProxy) — wire into Prometheus blackbox, Uptime Kuma, etc.
 
 ## 😎 Buy Me a Coffee ☕︎
 
@@ -570,7 +585,7 @@ Docker packaging: **GPL-3.0-or-later** — see [LICENSE](./LICENSE). Packaged so
 - **Semgrep CLI** — LGPL-2.1 ([license](https://github.com/semgrep/semgrep/blob/develop/LICENSE))
 - **Semgrep Registry rules** (fetched at runtime, not bundled) — Semgrep ToS, [semgrep.dev/legal](https://semgrep.dev/legal/)
 - **Semgrep Pro Engine** (requires your own token, not bundled) — proprietary, [semgrep.dev/legal](https://semgrep.dev/legal/)
-- **supergateway** — MIT ([repo](https://github.com/supercorp-ai/supergateway))
+- **mcp-proxy** — MIT ([repo](https://github.com/sparfenyuk/mcp-proxy))
 - **HAProxy** — GPL-2.0-or-later ([haproxy.org](https://www.haproxy.org/))
 
 ### Trademark Notice
