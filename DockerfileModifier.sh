@@ -80,7 +80,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \\
     echo "Installing packages: ${SEMGREP_PKG} + ${MCP_PROXY_PKG}" && \\
     pip install --no-cache-dir "${SEMGREP_PKG}" ${MCP_PROXY_PKG} && \\
     semgrep --version && \\
-    mcp-proxy --version || true && \\
+    mcp-proxy --version && \\
     apk del .build-deps && \\
     echo "Packages installed successfully"
 
