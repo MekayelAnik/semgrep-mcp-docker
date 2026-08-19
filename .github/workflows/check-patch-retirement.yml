@@ -34,6 +34,7 @@ concurrency:
 
 jobs:
   probe:
+    timeout-minutes: 15
     name: Vanilla semgrep multi-value SEMGREP_RULES probe
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
